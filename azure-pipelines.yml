@@ -1,0 +1,96 @@
+parameters:
+- name: docker_image_name
+  default: 'bla'
+- name: registry_name
+  default: 'devvintila.azurecr.io'
+- name: docker_image_name_retag
+  default: 'test'
+- name: buildid
+  default: '$(Build.BuildId)'
+- name: registry_name_prod
+  default: 'prodvintila.azurecr.io'
+
+stages:
+
+## CI stage starts here 
+
+- stage: CI
+  displayName: CI
+  jobs:
+  - job:  Build_Push
+    displayName: Build docker image
+    pool:
+      Cristian
+    steps:
+      - script: | 
+          dir
+        displayName: 'building an image'
+      - task: Maven@3
+        inputs:
+          mavenPomFile: 'pom.xml'
+          publishJUnitResults: false
+          javaHomeOption: 'JDKVersion'
+          mavenVersionOption: 'Default'
+          mavenAuthenticateFeed: false
+          effectivePomSkip: false
+          sonarQubeRunAnalysis: false
+        
+      - task: DockerInstaller@0
+        displayName: 'Install Docker 17.09.0-ce'
+        
+      - script: | 
+            docker build -t ${{parameters.registry_name}}/${{parameters.docker_image_name}}:$(Build.BuildId) .
+            echo $(build.artifactstagingdirectory)
+        displayName: 'building an image'
+
+      - script: | 
+         dir
+        displayName: 'list directories'
+
+      - script: | 
+          docker push ${{parameters.registry_name}}/${{parameters.docker_image_name}}:$(Build.BuildId)
+        displayName: 'push to neutral acr'
+
+
+##### CI stage finalizez here 
+
+- stage: CD_DEV
+  displayName: CD_DEV
+  jobs:
+  - job: Test
+    displayName: test
+    pool:
+      Cristian
+    steps:
+   
+    - task: DownloadPipelineArtifact@2
+      inputs:
+        buildType: 'specific'
+        project: 'cc7a1651-ddb3-42c4-878b-be30620a3829'
+        definition: '39'
+        buildVersionToDownload: 'specific'
+        pipelineId: ${{parameters.buildid}}
+        artifactName: 'ContainerImage_${{parameters.buildid}}'
+        targetPath: '$(Pipeline.Workspace)'
+
+    - script: | 
+        dir
+        docker pull ${{parameters.registry_name}}/${{parameters.docker_image_name}}:$(Build.BuildId)
+      displayName: 'load image from tar'
+
+
+    - script: | 
+        docker tag ${{parameters.docker_image_name}}:${{parameters.buildid}} ${{parameters.registry_name_prod}}/${{parameters.docker_image_name_retag}}:$(Build.BuildId)
+      displayName: 'retag image'
+
+
+    - script: |
+        az acr login --name ${{parameters.registry_name_prod}}
+      displayName: 'test and push '
+
+    - script: |
+        docker push  ${{parameters.registry_name_prod}}/${{parameters.docker_image_name_retag}}:$(Build.BuildId)
+      displayName: 'test and push '
+
+
+## just testing ci integartion
